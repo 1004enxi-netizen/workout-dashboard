@@ -765,6 +765,7 @@ let PENDING_PHOTO = null;    // {date, kind}
 let DAYPH_TAB = 'all';
 
 function render(){
+  captureDrafts();
   renderHeader();
   renderTabs();
   const app = $('#app');
@@ -777,6 +778,31 @@ function render(){
   renderSheet();
   paintPhotos();
   save();
+  restoreDrafts();
+}
+
+/* 화면을 다시 그려도 '입력 중이던 값 + 커서 + 포커스'를 잃지 않게 한다.
+   (모바일에서 키보드가 올라오면 resize 이벤트로 render()가 돌아 입력값이 날아가던 문제) */
+const DRAFT = {};
+const DRAFT_IDS = ['todayWeight','modalWeight','newHabit','sheetName','sheetWeight','sheetReps'];
+function captureDrafts(){
+  const a = document.activeElement;
+  DRAFT_IDS.forEach(id=>{
+    const el = document.getElementById(id);
+    if(el && el===a) DRAFT[id] = { v: el.value, s: el.selectionStart, e: el.selectionEnd };
+  });
+}
+function restoreDrafts(){
+  Object.keys(DRAFT).forEach(id=>{
+    const d = DRAFT[id]; delete DRAFT[id];
+    const el = document.getElementById(id);
+    if(!el) return;
+    if(el.value!==d.v) el.value = d.v;
+    try{
+      if(document.activeElement!==el) el.focus({preventScroll:true});
+      if(d.s!=null && el.setSelectionRange) el.setSelectionRange(d.s, d.e);
+    }catch(_){}
+  });
 }
 function renderHeader(){
   const st = dayStats(TODAY);
@@ -1313,7 +1339,7 @@ function renderModal(){
 /* ---------- add / edit sheet ---------- */
 function defaultSheet(){
   return { mode:'add', date:TODAY, part:'lower', cat:'하체', name:'스쿼트',
-           weight:60, depth:'풀', reps:5, sets:3, blockId:null };
+           weight:60, depth:'풀', reps:5, sets:3, blockId:null, typed:false };
 }
 function openAddSheet(date, part, cat, name){
   SHEET = defaultSheet();
@@ -1328,6 +1354,7 @@ function openAddSheet(date, part, cat, name){
   const last = lastSameBlock(SHEET.date, SHEET.name);
   if(last){ SHEET.weight = last.weight; SHEET.depth = last.depth; SHEET.reps = last.reps; SHEET.sets = 3; }
   SHEET.mode='add';
+  SHEET_SIG = '';
   render();
 }
 function openEditSheet(date, blockId){
@@ -1336,7 +1363,8 @@ function openEditSheet(date, blockId){
   if(!b) return;
   SHEET = { mode:'edit', date, part:b.part, cat:b.cat, name:b.name,
             weight:b.weight, depth:b.depth||'풀', reps:b.reps, sets:b.sets.length,
-            blockId:b.id, tag:b.tag, label:b.label };
+            blockId:b.id, tag:b.tag, label:b.label, typed:false };
+  SHEET_SIG = '';
   render();
 }
 function lastSameBlock(date, name){
@@ -1351,14 +1379,60 @@ function presetList(part, cat){
   if(part==='lower') return PRESETS.lower;
   return PRESETS[cat] || ['렛풀다운','체스트 프레스','사이드 레터럴 레이즈','숄더 프레스'];
 }
+/* 시트는 '구조가 바뀔 때만' 다시 그리고, 그 밖에는 버튼 상태만 갱신한다.
+   → 종목명을 입력하는 도중(모바일 키보드가 올라와 resize가 나는 순간)에
+     DOM이 통째로 새로 그려져 입력값·커서·포커스가 날아가던 문제를 막는다. */
+let SHEET_SIG = '';
+function sheetPresets(sh){
+  const out = [];
+  const used = (S.custom||[])
+    .filter(c=> sh.part==='lower' ? (c.cat||'하체')==='하체' : (c.cat||'등')===sh.cat)
+    .map(c=>c.name);
+  presetList(sh.part, sh.cat).concat(used).forEach(n=>{
+    n = String(n==null?'':n).trim();
+    if(n && !out.includes(n)) out.push(n);
+  });
+  return out;
+}
+function sheetSig(sh){
+  return [sh.mode, sh.date, sh.part, sh.cat, sheetPresets(sh).join('~'),
+          (sh.name||'').indexOf('스쿼트')>=0 ? 'S':'N'].join('|');
+}
 function renderSheet(){
   const root = $('#sheetRoot');
-  if(!SHEET){ root.innerHTML=''; return; }
+  if(!SHEET){ if(root.innerHTML) root.innerHTML=''; SHEET_SIG=''; return; }
   const sh = SHEET;
+  const sig = sheetSig(sh);
+  if(sig!==SHEET_SIG || !document.getElementById('sheetName')){
+    buildSheet(sh); SHEET_SIG = sig; return;
+  }
+  syncSheet(sh);
+}
+function syncSheet(sh){
+  const q = s => $$('#sheetRoot '+s);
+  q('[data-act="sheet-part"]').forEach(b=>b.classList.toggle('on', b.dataset.p===sh.part));
+  q('[data-act="sheet-cat"]').forEach(b=>b.classList.toggle('on', b.dataset.c===sh.cat));
+  q('[data-act="sheet-depth"]').forEach(b=>b.classList.toggle('on', b.dataset.d===sh.depth));
+  q('[data-act="sheet-sets"]').forEach(b=>b.classList.toggle('on', Number(b.dataset.n)===Number(sh.sets)));
+  q('[data-act="sheet-w"]').forEach(b=>b.classList.toggle('on', String(sh.weight)===b.dataset.w));
+  q('[data-act="sheet-preset"]').forEach(b=>b.classList.toggle('on', (b.dataset.n||'')===(sh.name||'').trim()));
+  [['sheetWeight',sh.weight],['sheetReps',sh.reps],['sheetName',sh.name]].forEach(pair=>{
+    const el = document.getElementById(pair[0]);
+    const v = pair[1]==null ? '' : String(pair[1]);
+    if(el && el!==document.activeElement && el.value!==v) el.value = v;
+  });
+}
+function buildSheet(sh){
+  const root = $('#sheetRoot');
   const cats = sh.part==='lower' ? ['하체'] : ['등','가슴','어깨','기타'];
-  const presets = presetList(sh.part, sh.cat);
-  const isSquat = sh.name.indexOf('스쿼트')>=0;
+  const presets = sheetPresets(sh);
+  const isSquat = (sh.name||'').indexOf('스쿼트')>=0;
   const wchips = ['20','40','50','55','60','70','80','90','100'].map(w=>'<button class="wchip'+(String(sh.weight)===w?' on':'')+'" data-act="sheet-w" data-w="'+w+'">'+w+'</button>').join('');
+  const presetChips = presets.length
+    ? '<div class="quickadd" style="margin-top:8px">'
+      + presets.map(p=>'<button class="gchip'+((sh.name||'').trim()===p?' on':'')+'" data-act="sheet-preset" data-n="'+esc(p)+'">'+esc(p)+'</button>').join('')
+      + '</div>'
+    : '';
 
   root.innerHTML = '<div class="backdrop" data-act="close-sheet">'
     + '<div class="modal" data-stop="1">'
@@ -1376,9 +1450,12 @@ function renderSheet(){
           + cats.map(c=>'<button data-act="sheet-cat" data-c="'+c+'" class="'+(sh.cat===c?'on':'')+'">'+c+'</button>').join('') + '</div></div>'
         : '')
     +     '<div class="field"><label>종목</label>'
-    +       '<input id="sheetName" list="exList" value="'+esc(sh.name)+'" placeholder="종목 이름" '+(sh.mode==='edit'?'readonly':'')+'>'
-    +       '<datalist id="exList">'+presets.map(p=>'<option value="'+esc(p)+'">').join('')+ (S.custom||[]).map(c=>'<option value="'+esc(c.name)+'">').join('') +'</datalist>'
-    +       '<div class="tiny muted" style="margin-top:5px">목록에 없는 종목은 그대로 입력하면 새 종목으로 추가돼요.</div>'
+    +       '<input id="sheetName" list="exList" value="'+esc(sh.name)+'" placeholder="종목 이름 (예: 원암 덤벨 로우)" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done">'
+    +       '<datalist id="exList">'+presets.map(p=>'<option value="'+esc(p)+'">').join('')+'</datalist>'
+    +       presetChips
+    +       '<div class="tiny muted" style="margin-top:5px">'+(sh.mode==='edit'
+              ? '이름을 지우고 새 종목을 입력하면 그 이름으로 바뀌어요.'
+              : '목록에 없는 종목은 그대로 입력하면 새 종목으로 추가돼요.')+'</div>'
     +     '</div>'
     +     '<div class="field"><label>중량 (빠른 선택)</label><div class="wchips">'+wchips+'</div>'
     +       '<div class="row2"><div><input id="sheetWeight" type="number" step="0.5" min="0" max="500" inputmode="decimal" value="'+sh.weight+'"><div class="tiny muted" style="margin-top:4px">kg</div></div>'
@@ -1461,18 +1538,41 @@ document.addEventListener('click', async (ev)=>{
     }
     case 'sheet-part': {
       if(SHEET.mode==='edit') break;
+      const prevPart = SHEET.part;
       SHEET.part = t.dataset.p;
       SHEET.cat = SHEET.part==='lower'?'하체':'등';
       const list = presetList(SHEET.part, SHEET.cat);
-      SHEET.name = list[0]||'';
-      const prev = lastSameBlock(SHEET.date, SHEET.name);
-      if(prev){ SHEET.weight=prev.weight; SHEET.depth=prev.depth; SHEET.reps=prev.reps; }
+      const nm = (SHEET.name||'').trim();
+      const keep = nm && (list.includes(nm) || SHEET.typed);
+      if(!keep){
+        SHEET.name = list[0]||'';
+        const prev = lastSameBlock(SHEET.date, SHEET.name);
+        if(prev){ SHEET.weight=prev.weight; SHEET.depth=prev.depth; SHEET.reps=prev.reps; }
+      } else if(prevPart!==SHEET.part){ /* 이름은 두고 중량만 직전 기록에 맞춘다 */
+        const prev = lastSameBlock(SHEET.date, SHEET.name);
+        if(prev){ SHEET.weight=prev.weight; SHEET.depth=prev.depth; SHEET.reps=prev.reps; }
+      }
       render(); break;
     }
     case 'sheet-cat': {
       SHEET.cat = t.dataset.c;
+      /* 새 세부 부위의 프리셋에 이미 있는 이름·직접 입력한 이름·수정 중인 기록은 그대로 둔다 */
       const list = presetList(SHEET.part, SHEET.cat);
-      if(list.length && !list.includes(SHEET.name)) SHEET.name = list[0];
+      const nm = (SHEET.name||'').trim();
+      const keep = nm && (list.includes(nm) || SHEET.typed || SHEET.mode==='edit');
+      if(!keep){
+        SHEET.name = list[0]||'';
+        const prev = lastSameBlock(SHEET.date, SHEET.name);
+        if(prev){ SHEET.weight=prev.weight; SHEET.depth=prev.depth; SHEET.reps=prev.reps; }
+      }
+      render(); break;
+    }
+    case 'sheet-preset': {
+      /* 프리셋 칩을 누르면 이름을 채워 준다(직접 입력한 이름은 건드리지 않음) */
+      SHEET.name = t.dataset.n || '';
+      SHEET.typed = false;
+      const prev = lastSameBlock(SHEET.date, SHEET.name);
+      if(prev){ SHEET.weight=prev.weight; SHEET.depth=prev.depth; SHEET.reps=prev.reps; }
       render(); break;
     }
     case 'sheet-w': { SHEET.weight = Number(t.dataset.w); render(); break; }
@@ -1500,7 +1600,9 @@ document.addEventListener('click', async (ev)=>{
       const inp = $('#newHabit');
       const name = (inp && inp.value || '').trim();
       if(!name){ toast('습관 이름을 적어 주세요'); return; }
+      if(S.habits.some(h=>h.name===name)){ toast('이미 있는 습관이에요'); return; }
       S.habits.push({ id:uid('h'), name });
+      if(inp) inp.blur();   /* 추가 후 입력칸 비우기(포커스 해제로 키보드도 내림) */
       save(); render(); toast('습관을 추가했어요'); break;
     }
     case 'del-habit': {
@@ -1516,10 +1618,15 @@ document.addEventListener('click', async (ev)=>{
       const inp = (MODAL && MODAL.date===date) ? $('#modalWeight') : ($('#todayWeight') || $('#modalWeight'));
       const raw = inp ? inp.value.trim() : '';
       const d = day(date);
-      if(raw===''){ d.body.weight = null; save(); render(); toast('체중 기록을 지웠어요'); return; }
-      const v = Number(raw);
+      if(raw===''){
+        if(d.body.weight==null){ toast('체중을 입력해 주세요'); return; }
+        if(!confirm('['+d.body.weight+'kg] 기록을 지울까요?')) return;
+        d.body.weight = null; save(); render(); toast('체중 기록을 지웠어요'); return;
+      }
+      const v = Number(raw.replace(',','.'));
       if(!isFinite(v) || v<20 || v>200){ toast('체중을 20~200 사이 숫자로 입력해 주세요'); return; }
       d.body.weight = +v.toFixed(1);
+      if(inp) inp.blur();
       save(); render(); toast(date.slice(5).replace('-','/')+' 체중 '+d.body.weight+'kg 저장');
       break;
     }
@@ -1564,22 +1671,36 @@ document.addEventListener('click', async (ev)=>{
   }
 });
 
-/* keep sheet fields in sync while typing */
+/* 입력 중인 값을 SHEET 상태에 계속 반영한다(입력값을 다시 덮어쓰지 않음). */
 document.addEventListener('input', (ev)=>{
-  if(!SHEET) return;
-  const id = ev.target.id;
-  if(id==='sheetName') SHEET.name = ev.target.value;
-  else if(id==='sheetWeight') SHEET.weight = ev.target.value===''?'':Number(ev.target.value);
-  else if(id==='sheetReps') SHEET.reps = ev.target.value===''?'':Number(ev.target.value);
+  const id = ev.target && ev.target.id;
+  if(!SHEET || !id) return;
+  if(id==='sheetName'){ SHEET.name = ev.target.value; SHEET.typed = true; }
+  else if(id==='sheetWeight'){ SHEET.weight = ev.target.value==='' ? '' : ev.target.value; }
+  else if(id==='sheetReps'){ SHEET.reps = ev.target.value==='' ? '' : ev.target.value; }
 });
+
+/* 종목명 입력창을 처음 누를 때 글자 전체를 선택해서, 바로 새 이름을 타이핑하면
+   기존 이름이 통째로 바뀌도록 한다(모바일에서 백스페이스 여러 번 누를 필요 없음). */
+document.addEventListener('focusin', (ev)=>{
+  const el = ev.target;
+  if(el && el.id==='sheetName' && !el.dataset.touched){
+    el.dataset.touched = '1';
+    try{ el.select(); }catch(e){}
+  }
+});
+
+function numOf(v){ return Number(String(v==null?'':v).replace(/\s+/g,'').replace(',','.')); }
 
 function saveSheet(){
   if(!SHEET) return;
   const sh = SHEET;
-  const name = (sh.name||'').trim();
+  /* 화면에 보이는 입력값을 최우선으로 읽는다(상태와 어긋나도 사용자가 본 값으로 저장) */
+  const nameEl = $('#sheetName'), wEl = $('#sheetWeight'), rEl = $('#sheetReps');
+  const name = String((nameEl ? nameEl.value : sh.name)||'').trim();
   if(!name){ toast('종목 이름을 적어 주세요'); return; }
-  const weight = Number(sh.weight);
-  const reps = Number(sh.reps);
+  const weight = numOf(wEl ? wEl.value : sh.weight);
+  const reps = numOf(rEl ? rEl.value : sh.reps);
   const sets = Math.max(1, Math.min(20, Number(sh.sets)||1));
   if(!isFinite(weight) || weight<0 || weight>500){ toast('중량을 확인해 주세요'); return; }
   if(!isFinite(reps) || reps<1 || reps>100){ toast('횟수를 확인해 주세요'); return; }
@@ -1587,15 +1708,20 @@ function saveSheet(){
   const part = sh.part;
   const cat = part==='lower' ? '하체' : (sh.cat||'등');
   const depth = name.indexOf('스쿼트')>=0 ? (sh.depth||'풀') : '';
+  const allPresets = Object.keys(PRESETS).reduce((a,k)=>a.concat(PRESETS[k]),[]);
+  const known = allPresets.includes(name) || (S.custom||[]).some(c=>c.name===name);
   if(sh.mode==='edit'){
     const b = d.blocks.find(x=>x.id===sh.blockId);
     if(!b){ SHEET=null; render(); return; }
+    const before = b.name;
+    b.name = name;              /* 수정 화면에서도 이름 변경 허용 */
     b.weight = weight; b.reps = reps; b.depth = depth; b.cat = cat; b.part = part;
     const old = b.sets;
     const next = [];
     for(let i=0;i<sets;i++) next.push(old[i]!==undefined? old[i] : false);
     b.sets = next;
-    toast('수정했어요');
+    if(!known) S.custom.push({ name, part, cat });
+    toast(before!==name ? before+' → '+name+' 로 바꿨어요' : '수정했어요');
   } else {
     const asDone = sh.date <= TODAY;   // 지난·오늘 기록은 '한 일'로 보고 완료 표시, 미래 날짜는 계획
     const same = d.blocks.find(b=>b.name===name && Number(b.weight)===weight && (b.depth||'')===depth && b.tag!=='prescribe' && b.reps===reps);
@@ -1605,7 +1731,6 @@ function saveSheet(){
                       tag:'manual', label:'', sets:new Array(sets).fill(asDone), ts:Date.now() });
     }
     // 새 종목 학습
-    const known = PRESETS.lower.includes(name) || PRESETS['등'].includes(name) || PRESETS['가슴'].includes(name) || PRESETS['어깨'].includes(name) || (S.custom||[]).some(c=>c.name===name);
     if(!known) S.custom.push({ name, part, cat });
     toast(name+' '+weight+'kg '+reps+'회 × '+sets+'세트 추가');
   }
@@ -1742,6 +1867,11 @@ document.addEventListener('keydown', (ev)=>{
     const b = document.querySelector('[data-act="add-habit"]');
     if(b) b.click();
   }
+  if(ev.key==='Enter' && (ev.target.id==='sheetName' || ev.target.id==='sheetWeight' || ev.target.id==='sheetReps')){
+    ev.preventDefault();
+    const b = document.querySelector('[data-act="save-sheet"]');
+    if(b) b.click();
+  }
 });
 
 /* ---------- init ---------- */
@@ -1749,7 +1879,17 @@ S = load();
 if(!S.ui.ym) S.ui.ym = TODAY.slice(0,7);
 render();
 let rsT = null;
-window.addEventListener('resize', ()=>{ clearTimeout(rsT); rsT = setTimeout(()=>render(), 250); });
+window.addEventListener('resize', ()=>{
+  clearTimeout(rsT);
+  rsT = setTimeout(()=>{
+    /* 모바일 키보드가 올라오거나 접힐 때도 resize가 발생한다.
+       입력 중이거나 시트/모달을 열어 둔 상태에서는 화면을 다시 그리지 않는다. */
+    const a = document.activeElement;
+    const typing = !!(a && (a.tagName==='INPUT' || a.tagName==='TEXTAREA' || a.isContentEditable));
+    if(typing || SHEET || MODAL) return;
+    render();
+  }, 250);
+});
 window.__wdApp = { get state(){ return S; }, ymd, render };
 
 })();

@@ -141,6 +141,35 @@
   .presc-bar{height:6px;border-radius:4px;background:#e6f4f1;overflow:hidden;margin:2px 0 2px}
   .presc-bar i{display:block;height:100%;background:linear-gradient(90deg,#0e9488,#5eead4);transition:.3s}
   .presc-done{margin-top:10px;background:#ecfdf5;border:1px solid #bbf7d0;color:#15803d;font-size:12.5px;font-weight:900;padding:9px 11px;border-radius:11px;text-align:center}
+  .presc-mode{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:900;padding:3px 8px;border-radius:999px;background:#e0f2fe;color:#075985}
+  .sq-foot{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;padding-top:9px;border-top:1px dashed #eef1f7}
+  .sq-foot .btn{flex:1 1 auto}
+  .undo-row{display:block;width:100%;margin-top:7px;font-size:11.5px;font-weight:900;color:#0b7f74;text-decoration:underline;text-underline-offset:2px;text-align:left}
+
+  /* ---------- 처방 모드 선택 ---------- */
+  .rx-modes{display:grid;gap:7px}
+  .rx-mode{display:flex;gap:10px;align-items:flex-start;text-align:left;padding:11px 12px;border-radius:14px;border:1.5px solid var(--line);background:#fbfcff;width:100%}
+  .rx-mode .rmi{font-size:18px;line-height:1.3;flex:0 0 auto}
+  .rx-mode .rmt{display:block;font-size:13.5px;font-weight:900;letter-spacing:-.01em;color:#212a40}
+  .rx-mode .rms{display:block;font-size:11.5px;font-weight:700;color:#7c8598;margin-top:3px;line-height:1.45}
+  .rx-mode.on{border-color:#0e9488;background:#f0fdfa;box-shadow:0 0 0 3px rgba(14,148,136,.10)}
+  .rx-mode.on .rmt{color:#0b6b60}
+  .rx-opt{display:flex;gap:9px;align-items:flex-start;margin-top:8px;padding:10px 12px;border-radius:13px;border:1.5px dashed #d7dceb;background:#fbfcff;width:100%;text-align:left}
+  .rx-opt.on{border-style:solid;border-color:#f59e0b;background:#fffbeb}
+  .rx-opt .rbox{width:20px;height:20px;border-radius:6px;border:2px solid #cfd6e6;background:#fff;display:grid;place-items:center;font-size:12px;color:#fff;flex:0 0 auto;margin-top:1px}
+  .rx-opt.on .rbox{background:#f59e0b;border-color:#f59e0b}
+  .rx-opt .rtx{font-size:12.5px;font-weight:900;color:#3b4358;line-height:1.45}
+  .rx-opt .rtx span{display:block;font-size:11px;font-weight:700;color:#8a92a6;margin-top:2px}
+  .rxlist{margin-top:2px;border:1px solid var(--line);border-radius:13px;overflow:hidden;background:#fff}
+  .rxrow{display:flex;align-items:center;gap:7px;padding:8px 10px;border-top:1px dashed #eef1f7;font-size:12.5px}
+  .rxrow:first-child{border-top:0}
+  .rxrow .rw{font-weight:900;min-width:46px;letter-spacing:-.02em}
+  .rxrow .rr{font-weight:800;color:#4b5468}
+  .rxrow .rtag{margin-left:auto;font-size:10px;font-weight:900;padding:2px 6px;border-radius:6px;background:#eef1f8;color:#5b6478;white-space:nowrap}
+  .rx-sum{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;font-size:11.5px;font-weight:900;color:#5b6478}
+  .rx-sum b{color:#0e9488}
+  .btn.danger{background:#fff5f5;border-color:#f6d5d5;color:#b91c1c}
+  .btn.danger:active{background:#fde8e8}
 
   /* ---------- exercise cards ---------- */
   .excard{border:1px solid var(--line);border-radius:14px;padding:11px 12px;margin-top:9px;background:#fdfdff}
@@ -550,41 +579,120 @@ function squatBaseline(date){
   if(!rung) rung = last && last.depth==='풀' ? Math.min(10, Math.max(3,last.reps)) : 5;
   return { rung: Math.min(10, rung), rungDate, last, goalW };
 }
-function makePrescription(date){
-  const base = squatBaseline(date);
+/* ---------- 처방 모드 (오늘 컨디션에 따라 3가지) ---------- */
+const RX_MODES = [
+  { id:'heavy', icon:'🏋️', name:'고중량 끌고 가는 날', short:'고중량 끌고 가기',
+    desc:'금요일 루틴 그대로 · 워밍업 → 60kg 풀 → 70~100kg 패럴·얕은 하프 → 60·40kg 풀 마무리' },
+  { id:'challenge', icon:'🎯', name:'60kg 풀 도전 · 조절', short:'60kg 풀 도전',
+    desc:'60kg 풀 목표 개수 × 3세트 도전 · 무리면 개수와 뒤 세트를 함께 줄여요' },
+  { id:'light', icon:'🌿', name:'컨디션 저하 · 무게 안 쳐지는 날', short:'컨디션 저하',
+    desc:'70kg 이상 없이 20·40·50kg 고반복(10~15회)으로 회복 위주' }
+];
+function rxModeInfo(id){ return RX_MODES.find(m=>m.id===id) || RX_MODES[1]; }
+
+/* mode별 오늘 세트 구성. reduce=true면 60kg 개수와 뒤따르는 세트까지 함께 줄인다. */
+function rxRows(mode, reduce, base){
+  const goalW = Number(base.goalW)||60;
+  const rung = Number(base.rung)||5;
   const goalR = Number(S.goal.reps)||10;
-  const doneGoal = base.rung >= goalR;
-  const nextReps = doneGoal ? goalR : Math.min(goalR, base.rung+1);
-  const bw = base.goalW;
-  const rows = [
+  const nextReps = Math.max(6, Math.min(goalR, rung+1));
+
+  if(mode==='heavy'){
+    /* 은희님 금요일 실제 기록 그대로 */
+    return [
+      { weight:70,  depth:'패럴',    reps:1, sets:1, label:'프라이머' },
+      { weight:20,  depth:'풀',      reps:8, sets:1, label:'웜업 1' },
+      { weight:40,  depth:'풀',      reps:5, sets:1, label:'웜업 2' },
+      { weight:50,  depth:'풀',      reps:2, sets:1, label:'웜업 3' },
+      { weight:55,  depth:'풀',      reps:1, sets:1, label:'웜업 4' },
+      { weight:goalW, depth:'풀',    reps:5, sets:2, label:'메인', main:true },
+      { weight:70,  depth:'패럴',    reps:1, sets:1, label:'무게 올리기 1' },
+      { weight:80,  depth:'얕은 하프', reps:1, sets:1, label:'무게 올리기 2' },
+      { weight:90,  depth:'얕은 하프', reps:1, sets:1, label:'무게 올리기 3' },
+      { weight:100, depth:'얕은 하프', reps:2, sets:1, label:'톱 세트' },
+      { weight:90,  depth:'얕은 하프', reps:3, sets:1, label:'내리기' },
+      { weight:goalW, depth:'풀',    reps:5, sets:1, label:'마무리' },
+      { weight:40,  depth:'풀',      reps:10, sets:1, label:'백오프' }
+    ];
+  }
+
+  if(mode==='light'){
+    /* 70kg 이상은 절대 넣지 않는다 — 중저중량 고반복 */
+    const rows = [
+      { weight:20, depth:'풀', reps:15, sets:1, label:'웜업' },
+      { weight:40, depth:'풀', reps:12, sets:2, label:'메인', main:true },
+      { weight:50, depth:'풀', reps:10, sets:2, label:'메인 2' },
+      { weight:40, depth:'풀', reps:15, sets:1, label:'마무리' }
+    ];
+    if(rung>=8) rows.push({ weight:55, depth:'풀', reps:8, sets:1, label:'여유 있으면' });
+    return rows;
+  }
+
+  /* challenge — 60kg 풀 도전 */
+  if(reduce){
+    return [
+      { weight:20, depth:'풀', reps:8, sets:1, label:'웜업 1' },
+      { weight:40, depth:'풀', reps:5, sets:1, label:'웜업 2' },
+      { weight:50, depth:'풀', reps:2, sets:1, label:'웜업 3' },
+      { weight:goalW, depth:'풀', reps:4, sets:2, label:'메인', main:true },
+      { weight:Math.max(20, goalW-10), depth:'풀', reps:5, sets:1, label:'백오프' }
+    ];
+  }
+  return [
     { weight:20, depth:'풀', reps:8, sets:1, label:'웜업 1' },
     { weight:40, depth:'풀', reps:5, sets:1, label:'웜업 2' },
     { weight:50, depth:'풀', reps:3, sets:1, label:'웜업 3' },
-    { weight:bw, depth:'풀', reps:nextReps, sets:3, label:'메인', main:true },
-    { weight:bw+20, depth:'하프', reps:1, sets:1, label:'톱 싱글(선택)' },
-    { weight:40, depth:'풀', reps:10, sets:1, label:'백오프' }
+    { weight:goalW, depth:'풀', reps:nextReps, sets:3, label:'메인', main:true },
+    { weight:goalW, depth:'풀', reps:Math.max(3, nextReps-2), sets:1, label:'백오프' },
+    { weight:40, depth:'풀', reps:10, sets:1, label:'마무리' }
   ];
-  return { base, rows, nextReps, doneGoal };
 }
-function applyPrescription(date){
-  const p = makePrescription(date);
+
+function makePrescription(date, mode, reduce){
+  const base = squatBaseline(date);
+  const rows = rxRows(mode||'challenge', !!reduce, base);
+  let sets = 0, reps = 0;
+  rows.forEach(r=>{ sets += r.sets; reps += r.sets*r.reps; });
+  const main = rows.find(r=>r.main) || rows[0];
+  return { base, rows, mode: mode||'challenge', reduce: !!reduce, main, sets, reps };
+}
+function applyPrescription(date, mode, reduce){
+  const p = makePrescription(date, mode, reduce);
   const d = day(date);
   // 완료한 처방 세트는 실제 기록으로 남기고, 미완료 처방만 지운 뒤 새 처방을 넣는다
   const kept = [];
   d.blocks.forEach(b=>{
     if(b.tag!=='prescribe'){ kept.push(b); return; }
-    if(b.sets.some(Boolean)){ b.tag = 'log'; b.label = ''; kept.push(b); }
+    if(b.sets.some(Boolean)){ b.tag = 'log'; b.label = ''; delete b.rxmode; kept.push(b); }
   });
   d.blocks = kept;
   p.rows.forEach(r=>{
     d.blocks.push({
       id:uid('b'), name:'스쿼트', part:'lower', cat:'하체',
-      weight:r.weight, depth:r.depth, reps:r.reps, tag:'prescribe',
+      weight:r.weight, depth:r.depth, reps:r.reps, tag:'prescribe', rxmode:p.mode,
       label:r.label, sets:new Array(r.sets).fill(false), ts:Date.now()
     });
   });
+  d.rx = { mode:p.mode, reduce:p.reduce, at:Date.now() };
   save();
   return p;
+}
+/* 오늘 스쿼트 비우기 / 처방 전체 삭제 — 지운 기록은 UNDO_SQUAT에 담아 한 번 되돌릴 수 있게 */
+let UNDO_SQUAT = null;
+function clearSquat(date, onlyPresc){
+  const d = day(date);
+  const targets = d.blocks.filter(b=> b.name==='스쿼트' && (!onlyPresc || b.tag==='prescribe'));
+  if(!targets.length){ toast(onlyPresc? '지울 처방이 없어요' : '지울 스쿼트 기록이 없어요'); return; }
+  const doneSets = targets.reduce((a,b)=>a+b.sets.filter(Boolean).length, 0);
+  const msg = onlyPresc
+    ? '오늘 처방 '+targets.length+'줄을 지울까요?'
+    : '오늘 스쿼트 기록 '+targets.length+'줄'+(doneSets? ' ('+doneSets+'세트 완료)':'')+'을 모두 지울까요?\n처방과 기록이 함께 사라져요.';
+  if(!confirm(msg)) return;
+  UNDO_SQUAT = { date, blocks: targets.map(b=>JSON.parse(JSON.stringify(b))), rx: d.rx? Object.assign({}, d.rx):null, onlyPresc };
+  d.blocks = d.blocks.filter(b=> targets.indexOf(b)<0);
+  if(!d.blocks.some(b=>b.name==='스쿼트')) delete d.rx;
+  save(); render();
+  toast(onlyPresc? '처방을 지웠어요 · 바로 되돌릴 수 있어요' : '오늘 스쿼트를 비웠어요 · 바로 되돌릴 수 있어요');
 }
 
 /* ---------- photos (IndexedDB) ---------- */
@@ -975,10 +1083,10 @@ function squatHero(date){
   +   '<div class="lastrec">직전 기록 · '+lastTxt+'</div>'
   +   '<div class="ladder">'+ladder+'</div>'
   +   '<div class="prescribe"><button class="btn" data-act="prescribe" data-date="'+date+'">'
-  +     (hasPres? '🔄 오늘 스쿼트 처방 다시 받기' : '🎯 오늘 스쿼트 처방받기') + '</button></div>'
+  +     (hasPres? '🔄 오늘 스쿼트 처방 다시 고르기' : '🎯 오늘 스쿼트 처방받기') + '</button></div>'
   +   '<div class="tiny" style="color:#9fb6c8;margin-top:7px">'+(hasPres
-        ? '처방 세트를 하나씩 체크하며 실제로 해 보세요. 세트를 눌러 완료 표시할 수 있어요.'
-        : '직전 기록과 목표를 바탕으로 오늘의 점진적 과부하 루틴을 만들어 드려요.')+'</div>'
+        ? '처방 세트를 하나씩 체크하며 실제로 해 보세요. 오늘 안 할 거면 처방을 비울 수 있어요.'
+        : '고중량 · 60kg 도전 · 컨디션 저하 — 오늘 몸 상태에 맞는 3가지 중에서 바로 골라요.')+'</div>'
   + '</section>';
 }
 
@@ -988,6 +1096,7 @@ function squatRecordCard(date){
   const presBlocks = squatBlocks.filter(b=>b.tag==='prescribe');
   const logBlocks = squatBlocks.filter(b=>b.tag!=='prescribe');
   const stat = squatBlocks.reduce((a,b)=>{ const s=blockStats(b); a.sets+=s.done; a.reps+=s.reps; return a; },{sets:0,reps:0});
+  const canUndo = !!(UNDO_SQUAT && UNDO_SQUAT.date===date);
   return ''
   + '<section class="card">'
   +   '<div class="card-h"><h2>오늘의 스쿼트 기록</h2>'
@@ -995,6 +1104,10 @@ function squatRecordCard(date){
   +     '<div class="right"><button class="btn sm ghost" data-act="open-add" data-date="'+date+'" data-part="lower" data-name="스쿼트">+ 추가</button></div></div>'
   +   (logBlocks.length ? blockList(date, logBlocks, 'lower') :
       '<div class="empty">'+(presBlocks.length? '처방 세트를 체크하면 이곳에 기록으로 쌓여요.' : '오늘 스쿼트 기록이 아직 없어요.<br>처방을 받거나 <b>+ 추가</b>로 세트를 남겨 보세요.')+'</div>')
+  +   (squatBlocks.length
+        ? '<div class="sq-foot"><button class="btn sm danger" data-act="clear-squat" data-date="'+date+'">🧹 오늘 스쿼트 비우기 (처방 포함)</button></div>'
+        : '')
+  +   (canUndo ? '<button class="undo-row" data-act="undo-clear">↩ 방금 비운 기록 되돌리기</button>' : '')
   + '</section>';
 }
 
@@ -1005,14 +1118,18 @@ function prescriptionCard(date){
   pre.forEach(b=>{ done += b.sets.filter(Boolean).length; total += b.sets.length; });
   const main = pre.find(b=>b.label==='메인');
   const pct = total? Math.round(done/total*100) : 0;
+  const rx = day(date).rx || {};
+  const info = rxModeInfo(rx.mode || (pre[0]&&pre[0].rxmode));
+  const modeChip = rx.mode ? '<span class="presc-mode">'+info.icon+' '+esc(info.short||info.name)+(rx.reduce&&rx.mode==='challenge'? ' · 무리 줄임':'')+'</span>' : '';
   return '<section class="card presc-card">'
-    + '<div class="card-h"><h2>🎯 오늘의 처방</h2>'
-    +   '<span class="sub">'+(main? '메인 '+main.weight+'kg '+main.reps+'회 × '+main.sets.length+'세트' : '')+'</span>'
-    +   '<div class="right"><button class="btn sm ghost" data-act="prescribe" data-date="'+date+'">다시 받기</button></div></div>'
+    + '<div class="card-h"><h2>🎯 오늘의 처방</h2>'+modeChip+'</div>'
+    + '<div class="tiny" style="font-weight:900;color:#0b7f74;margin-bottom:4px">'+(main? '메인 '+main.weight+'kg '+main.reps+'회 × '+main.sets.length+'세트' : '')+'</div>'
     + '<div class="presc-bar"><i style="width:'+pct+'%"></i></div>'
     + '<div class="tiny muted" style="margin:6px 0 2px">완료 '+done+'/'+total+'세트 · 세트를 탭하면 체크돼요</div>'
     + blockList(date, pre, 'lower')
     + (done===total? '<div class="presc-done">🎉 오늘 처방 완료! 다음 처방은 한 단계 위로 올라가요.</div>' : '')
+    + '<div class="sq-foot"><button class="btn sm ghost" data-act="prescribe" data-date="'+date+'">🔄 처방 다시 고르기</button>'
+    +   '<button class="btn sm danger" data-act="clear-presc" data-date="'+date+'">🗑 처방 전체 삭제</button></div>'
     + '</section>';
 }
 
@@ -1305,9 +1422,59 @@ function closeModal(){
   document.body.classList.remove('locked');
   render();
 }
+/* ---------- 처방 모드 고르기 ---------- */
+function openRx(date){
+  const cur = day(date).rx || {};
+  MODAL = { type:'rx', date, mode: cur.mode || 'challenge', reduce: !!(cur.mode==='challenge' && cur.reduce) };
+  document.body.classList.add('locked');
+  render();
+}
+function rxModalHTML(){
+  const date = MODAL.date;
+  const mode = MODAL.mode || 'challenge';
+  const reduce = !!MODAL.reduce;
+  const p = makePrescription(date, mode, reduce);
+  const base = p.base;
+  const lastTxt = base.last
+    ? base.last.weight+'kg '+base.last.depth+' '+base.last.reps+'회 × '+base.last.sets+'세트 · '+base.last.date.slice(5).replace('-','/')
+    : '아직 기록 없음';
+  const modeHtml = RX_MODES.map(m=>'<button class="rx-mode'+(mode===m.id?' on':'')+'" data-act="rx-mode" data-m="'+m.id+'">'
+    + '<span class="rmi">'+m.icon+'</span>'
+    + '<span><span class="rmt">'+esc(m.name)+'</span><span class="rms">'+esc(m.desc)+'</span></span></button>').join('');
+  const rowsHtml = p.rows.map(r=>'<div class="rxrow">'
+    + '<span class="rw">'+r.weight+'kg</span>'
+    + '<span class="bd '+depthClass(r.depth)+'">'+esc(r.depth)+'</span>'
+    + '<span class="rr">'+r.reps+'회 × '+r.sets+'세트</span>'
+    + '<span class="rtag">'+esc(r.label)+'</span></div>').join('');
+  const hasPres = day(date).blocks.some(b=>b.tag==='prescribe');
+  return '<div class="backdrop" data-act="close-modal">'
+    + '<div class="modal" data-stop="1">'
+    +   '<div class="modal-h"><div><h3>오늘 스쿼트 처방</h3>'
+    +     '<div class="sub">'+(date===TODAY? '오늘' : date.slice(5).replace('-','/'))+' · 직전 '+esc(lastTxt)+'</div></div>'
+    +     '<button class="xbtn" data-act="close-modal">✕</button></div>'
+    +   '<div class="modal-b">'
+    +     '<div class="field" style="margin-top:0"><label>1. 오늘 컨디션에 맞는 처방을 고르세요</label>'
+    +       '<div class="rx-modes">'+modeHtml+'</div>'
+    +       (mode==='challenge'
+              ? '<button class="rx-opt'+(reduce?' on':'')+'" data-act="rx-reduce"><span class="rbox">'+(reduce?'✓':'')+'</span>'
+                + '<span class="rtx">무리일 때 · 개수와 뒤 세트 줄이기<span>지금 고르면 '+p.sets+'세트 · '+p.reps+'회 (60kg 메인 '+p.main.reps+'회 × '+p.main.sets+'세트)'+(reduce?'':' — 켜면 4회 × 2세트로 줄고 뒤 세트도 짧아져요')+'</span></span></button>'
+              : '')
+    +     '</div>'
+    +     '<div class="field"><label>2. 오늘 나올 세트 미리보기</label>'
+    +       '<div class="rxlist">'+rowsHtml+'</div>'
+    +       '<div class="rx-sum"><span>총 <b>'+p.sets+'세트</b></span><span>총 <b>'+p.reps+'회</b></span><span>최고 <b>'+Math.max.apply(null,p.rows.map(r=>r.weight))+'kg</b></span></div>'
+    +     '</div>'
+    +     (mode==='light' ? '<div class="note">70kg 이상은 넣지 않았어요. 무게보다 반복으로 채우는 날이에요.</div>' : '')
+    +     (hasPres ? '<div class="note">이미 받은 처방은 지워지고, 이미 체크한 세트는 기록으로 남겨 둘게요.</div>' : '')
+    +   '</div>'
+    +   '<div class="modal-f"><button class="btn" data-act="close-modal" style="flex:0 0 auto">취소</button>'
+    +     '<button class="btn dark" style="flex:1" data-act="rx-apply">이 처방 적용하기</button></div>'
+    + '</div></div>';
+}
 function renderModal(){
   const root = $('#modalRoot');
   if(!MODAL){ root.innerHTML=''; return; }
+  if(MODAL.type==='rx'){ root.innerHTML = rxModalHTML(); return; }
   if(MODAL.type==='photo'){
     const id = MODAL.id;
     root.innerHTML = '<div class="backdrop center" data-act="close-modal">'
@@ -1569,13 +1736,38 @@ document.addEventListener('click', async (ev)=>{
       openDay(t.dataset.date); break;
     }
     case 'prescribe': {
-      const date = t.dataset.date || TODAY;
-      const p = applyPrescription(date);
-      render();
-      toast(p.doneGoal
-        ? '목표 60kg 10회 달성! 오늘은 10회로 다지고, 다음엔 62.5kg에 도전해 볼까요?'
-        : '오늘의 스쿼트 처방을 만들었어요 · 메인 '+p.base.goalW+'kg '+p.nextReps+'회 × 3세트');
+      openRx(t.dataset.date || TODAY);
       break;
+    }
+    case 'rx-mode': {
+      if(!MODAL || MODAL.type!=='rx') return;
+      MODAL.mode = t.dataset.m;
+      if(MODAL.mode!=='challenge') MODAL.reduce = false;
+      render(); break;
+    }
+    case 'rx-reduce': {
+      if(!MODAL || MODAL.type!=='rx') return;
+      MODAL.reduce = !MODAL.reduce;
+      render(); break;
+    }
+    case 'rx-apply': {
+      if(!MODAL || MODAL.type!=='rx') return;
+      const date = MODAL.date, mode = MODAL.mode || 'challenge', reduce = !!MODAL.reduce;
+      const p = applyPrescription(date, mode, reduce);
+      MODAL = null; document.body.classList.remove('locked');
+      render();
+      toast(rxModeInfo(mode).icon+' '+rxModeInfo(mode).name+' · 메인 '+p.main.weight+'kg '+p.main.reps+'회 × '+p.main.sets+'세트 ('+p.sets+'세트 처방)');
+      break;
+    }
+    case 'clear-squat': { clearSquat(t.dataset.date || TODAY, false); break; }
+    case 'clear-presc': { clearSquat(t.dataset.date || TODAY, true); break; }
+    case 'undo-clear': {
+      if(!UNDO_SQUAT) return;
+      const u = UNDO_SQUAT; UNDO_SQUAT = null;
+      const d = day(u.date);
+      u.blocks.forEach(b=> d.blocks.push(b));
+      if(u.rx) d.rx = u.rx;
+      save(); render(); toast('비운 기록을 되돌렸어요'); break;
     }
     case 'toggle-set': {
       const date = t.dataset.date, bid = t.dataset.block, i = Number(t.dataset.i);

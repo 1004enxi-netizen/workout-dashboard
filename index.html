@@ -349,6 +349,27 @@ const LOCALE_D = d => (d.getMonth()+1)+'월 '+d.getDate()+'일';
 
 const DEPTHS = ['풀','패럴','하프','얕은 하프'];
 const WEIGHTS = [20,40,50,55,60,70,80,90,100];
+/* 부위별 '중량 빠른 선택' 목록 — 하체는 기존 사다리 그대로, 상체는 부위에 맞는 무게로 바뀐다 */
+const WEIGHT_PRESETS = {
+  하체: WEIGHTS,
+  어깨: [2,3,4,5,6,8],          /* 덤벨 */
+  등:   [15,20,25,30,35,40],
+  가슴: [15,20,25,30,35,40],
+  기타: [2,3,4,5,6,8,15,20,25,30,35,40]
+};
+const WEIGHT_DEFAULT = { 하체:60, 어깨:5, 등:20, 가슴:20, 기타:5 };
+function weightKey(part, cat){
+  if(part==='lower') return '하체';
+  const c = cat || '등';
+  return WEIGHT_PRESETS[c] ? c : '기타';
+}
+function weightPresets(part, cat){
+  return WEIGHT_PRESETS[weightKey(part, cat)] || WEIGHT_PRESETS.하체;
+}
+function weightDefault(part, cat){
+  const v = WEIGHT_DEFAULT[weightKey(part, cat)];
+  return v==null ? 60 : v;
+}
 const PRESETS = {
   lower:['스쿼트','레그프레스','루마니안 데드리프트','런지','레그 익스텐션','레그 컬','힙쓰러스트','카프레이즈'],
   등:['렛풀다운','시티드 로우','바벨 로우'],
@@ -1357,6 +1378,7 @@ function openAddSheet(date, part, cat, name){
   }
   const last = lastSameBlock(SHEET.date, SHEET.name);
   if(last){ SHEET.weight = last.weight; SHEET.depth = last.depth; SHEET.reps = last.reps; SHEET.sets = 3; }
+  else { SHEET.weight = weightDefault(SHEET.part, SHEET.cat); }
   SHEET.mode='add';
   SHEET_SIG = '';
   render();
@@ -1431,7 +1453,9 @@ function buildSheet(sh){
   const cats = sh.part==='lower' ? ['하체'] : ['등','가슴','어깨','기타'];
   const presets = sheetPresets(sh);
   const isSquat = (sh.name||'').indexOf('스쿼트')>=0;
-  const wchips = ['20','40','50','55','60','70','80','90','100'].map(w=>'<button class="wchip'+(String(sh.weight)===w?' on':'')+'" data-act="sheet-w" data-w="'+w+'">'+w+'</button>').join('');
+  const wlist = weightPresets(sh.part, sh.cat);
+  const wchips = wlist.map(w=>'<button class="wchip'+(String(sh.weight)===String(w)?' on':'')+'" data-act="sheet-w" data-w="'+w+'">'+w+'</button>').join('');
+  const wlabel = weightKey(sh.part, sh.cat);
   const presetChips = presets.length
     ? '<div class="quickadd" style="margin-top:8px">'
       + presets.map(p=>'<button class="gchip'+((sh.name||'').trim()===p?' on':'')+'" data-act="sheet-preset" data-n="'+esc(p)+'">'+esc(p)+'</button>').join('')
@@ -1461,7 +1485,7 @@ function buildSheet(sh){
               ? '이름을 지우고 새 종목을 입력하면 그 이름으로 바뀌어요.'
               : '목록에 없는 종목은 그대로 입력하면 새 종목으로 추가돼요.')+'</div>'
     +     '</div>'
-    +     '<div class="field"><label>중량 (빠른 선택)</label><div class="wchips">'+wchips+'</div>'
+    +     '<div class="field"><label>중량 (빠른 선택'+(wlabel==='하체'?'':' · '+wlabel)+(wlabel==='어깨'?' 덤벨':'')+')</label><div class="wchips">'+wchips+'</div>'
     +       '<div class="row2"><div><input id="sheetWeight" type="number" step="0.5" min="0" max="500" inputmode="decimal" value="'+sh.weight+'"><div class="tiny muted" style="margin-top:4px">kg</div></div>'
     +       '<div><input id="sheetReps" type="number" min="1" max="100" inputmode="numeric" value="'+sh.reps+'"><div class="tiny muted" style="margin-top:4px">회</div></div></div>'
     +     '</div>'
@@ -1548,26 +1572,27 @@ document.addEventListener('click', async (ev)=>{
       const list = presetList(SHEET.part, SHEET.cat);
       const nm = (SHEET.name||'').trim();
       const keep = nm && (list.includes(nm) || SHEET.typed);
-      if(!keep){
-        SHEET.name = list[0]||'';
+      if(!keep) SHEET.name = list[0]||'';
+      if(!keep || prevPart!==SHEET.part){
+        /* 이름은 두고 중량은 직전 기록에 맞춘다. 그 부위 첫 종목이면 그 부위 기본 무게 */
         const prev = lastSameBlock(SHEET.date, SHEET.name);
         if(prev){ SHEET.weight=prev.weight; SHEET.depth=prev.depth; SHEET.reps=prev.reps; }
-      } else if(prevPart!==SHEET.part){ /* 이름은 두고 중량만 직전 기록에 맞춘다 */
-        const prev = lastSameBlock(SHEET.date, SHEET.name);
-        if(prev){ SHEET.weight=prev.weight; SHEET.depth=prev.depth; SHEET.reps=prev.reps; }
+        else { SHEET.weight = weightDefault(SHEET.part, SHEET.cat); }
       }
       render(); break;
     }
     case 'sheet-cat': {
+      const prevCat = SHEET.cat;
       SHEET.cat = t.dataset.c;
       /* 새 세부 부위의 프리셋에 이미 있는 이름·직접 입력한 이름·수정 중인 기록은 그대로 둔다 */
       const list = presetList(SHEET.part, SHEET.cat);
       const nm = (SHEET.name||'').trim();
       const keep = nm && (list.includes(nm) || SHEET.typed || SHEET.mode==='edit');
-      if(!keep){
-        SHEET.name = list[0]||'';
+      if(!keep) SHEET.name = list[0]||'';
+      if(SHEET.mode!=='edit' && prevCat!==SHEET.cat){
         const prev = lastSameBlock(SHEET.date, SHEET.name);
         if(prev){ SHEET.weight=prev.weight; SHEET.depth=prev.depth; SHEET.reps=prev.reps; }
+        else { SHEET.weight = weightDefault(SHEET.part, SHEET.cat); }
       }
       render(); break;
     }

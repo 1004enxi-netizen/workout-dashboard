@@ -279,6 +279,14 @@
   .wchips{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px}
   .wchip{font-size:12px;font-weight:900;padding:6px 9px;border-radius:9px;background:#f1f3f9;color:#5a6478;border:1px solid transparent}
   .wchip.on{background:var(--accent);color:#fff}
+  /* 여러 세트 담기 */
+  .stagebtn{margin-top:2px;background:#e9f7f4;border-color:#cbe9e4;color:#0b7f74}
+  .staged{display:grid;gap:6px;margin-top:8px}
+  .staged .shd{font-size:11px;font-weight:900;color:#6b7488}
+  .srow{display:flex;align-items:center;gap:8px;background:#fbfcff;border:1px solid var(--line);border-radius:11px;padding:7px 9px}
+  .srow .sn{flex:0 0 auto;width:20px;height:20px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:900;display:grid;place-items:center}
+  .srow .sv{font-size:12.5px;font-weight:800;color:#2b3348;letter-spacing:-.01em}
+  .srow .sx{margin-left:auto;flex:0 0 auto;width:28px;height:28px;border-radius:9px;background:#f2f4fa;color:#b91c1c;font-size:13px;font-weight:900;display:grid;place-items:center}
   .photo-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px}
   .ph{position:relative;aspect-ratio:3/4;border-radius:11px;background:#eef1f7 center/cover no-repeat;border:1px solid var(--line)}
   .ph.missing:after{content:"사진을 불러오지 못했어요";position:absolute;inset:0;display:grid;place-items:center;font-size:9.5px;color:var(--muted);text-align:center;padding:4px}
@@ -1364,7 +1372,8 @@ function renderModal(){
 /* ---------- add / edit sheet ---------- */
 function defaultSheet(){
   return { mode:'add', date:TODAY, part:'lower', cat:'하체', name:'스쿼트',
-           weight:60, depth:'풀', reps:5, sets:3, blockId:null, typed:false };
+           weight:60, depth:'풀', reps:5, sets:3, blockId:null, typed:false,
+           staged:[] };   /* 여러 세트 일괄 입력: 담아 둔 세트 목록 */
 }
 function openAddSheet(date, part, cat, name){
   SHEET = defaultSheet();
@@ -1430,11 +1439,35 @@ function renderSheet(){
   const sh = SHEET;
   const sig = sheetSig(sh);
   if(sig!==SHEET_SIG || !document.getElementById('sheetName')){
-    buildSheet(sh); SHEET_SIG = sig; return;
+    buildSheet(sh); SHEET_SIG = sig; paintStaged(sh); return;
   }
   syncSheet(sh);
 }
+/* 담아 둔 세트 목록 + 하단 버튼 문구 — 구조를 다시 그리지 않고 이 부분만 갱신한다 */
+function stagedText(sh, r){
+  const isSquat = (sh.name||'').indexOf('스쿼트')>=0;
+  return r.weight+'kg · '+r.reps+'회 · '+r.sets+'세트' + (isSquat && r.depth ? ' · '+r.depth : '');
+}
+function paintStaged(sh){
+  const n = (sh.staged||[]).length;
+  const btn = $('#sheetRoot [data-act="save-sheet"]');
+  if(btn && sh.mode!=='edit') btn.textContent = n ? n+'개 한 번에 추가하기' : '추가하기';
+  const box = document.getElementById('sheetStaged');
+  if(!box) return;
+  if(!n){
+    box.innerHTML = '<div class="tiny muted" style="line-height:1.5">아직 담긴 세트가 없어요. 무게·횟수·세트 수를 고르고 <b>+ 이 세트 담기</b>를 누르면 1번, 2번 … 순서대로 쌓여요.</div>';
+    return;
+  }
+  const nameEl = document.getElementById('sheetName');
+  const nm = String((nameEl ? nameEl.value : sh.name)||'').trim();
+  box.innerHTML = '<div class="shd">'+(nm?esc(nm)+' · ':'')+n+'개 담김</div>'
+    + (sh.staged||[]).map((r,i)=>'<div class="srow"><span class="sn">'+(i+1)+'</span>'
+        + '<span class="sv">'+esc(stagedText(sh,r))+'</span>'
+        + '<button class="sx" data-act="unstage-set" data-i="'+i+'" aria-label="'+(i+1)+'번째 담은 세트 빼기">✕</button></div>').join('')
+    + '<div class="tiny muted" style="line-height:1.5">저장을 누르면 담은 '+n+'개만 기록돼요. 위 입력칸의 다른 값은 <b>+ 이 세트 담기</b>로 먼저 담아 주세요.</div>';
+}
 function syncSheet(sh){
+  paintStaged(sh);
   const q = s => $$('#sheetRoot '+s);
   q('[data-act="sheet-part"]').forEach(b=>b.classList.toggle('on', b.dataset.p===sh.part));
   q('[data-act="sheet-cat"]').forEach(b=>b.classList.toggle('on', b.dataset.c===sh.cat));
@@ -1495,6 +1528,10 @@ function buildSheet(sh){
     +     '<div class="field"><label>세트 수</label><div class="seg">'
     +       [1,2,3,4,5].map(n=>'<button data-act="sheet-sets" data-n="'+n+'" class="'+(sh.sets===n?'on':'')+'">'+n+'세트</button>').join('')
     +     '</div></div>'
+    +     (sh.mode==='edit' ? '' :
+          '<div class="field"><label>담긴 세트</label>'
+          + '<button class="btn wide stagebtn" data-act="stage-set">+ 이 세트 담기</button>'
+          + '<div id="sheetStaged" class="staged" aria-live="polite"></div></div>')
     +   '</div>'
     +   '<div class="modal-f">'
     +     (sh.mode==='edit'? '<button class="btn" data-act="del-sheet-block">삭제</button>':'')
@@ -1579,6 +1616,9 @@ document.addEventListener('click', async (ev)=>{
         if(prev){ SHEET.weight=prev.weight; SHEET.depth=prev.depth; SHEET.reps=prev.reps; }
         else { SHEET.weight = weightDefault(SHEET.part, SHEET.cat); }
       }
+      if(prevPart!==SHEET.part && (SHEET.staged||[]).length){
+        SHEET.staged = []; toast('부위를 바꿔 담아 둔 세트를 비웠어요');
+      }
       render(); break;
     }
     case 'sheet-cat': {
@@ -1594,6 +1634,9 @@ document.addEventListener('click', async (ev)=>{
         if(prev){ SHEET.weight=prev.weight; SHEET.depth=prev.depth; SHEET.reps=prev.reps; }
         else { SHEET.weight = weightDefault(SHEET.part, SHEET.cat); }
       }
+      if(prevCat!==SHEET.cat && (SHEET.staged||[]).length){
+        SHEET.staged = []; toast('세부 부위를 바꿔 담아 둔 세트를 비웠어요');
+      }
       render(); break;
     }
     case 'sheet-preset': {
@@ -1607,6 +1650,14 @@ document.addEventListener('click', async (ev)=>{
     case 'sheet-w': { SHEET.weight = Number(t.dataset.w); render(); break; }
     case 'sheet-depth': { SHEET.depth = t.dataset.d; render(); break; }
     case 'sheet-sets': { SHEET.sets = Number(t.dataset.n); render(); break; }
+    case 'stage-set': { stageSheet(); break; }
+    case 'unstage-set': {
+      if(!SHEET) return;
+      const i = Number(t.dataset.i);
+      if(!(i>=0)) return;
+      SHEET.staged = (SHEET.staged||[]).filter((_,k)=>k!==i);
+      render(); break;
+    }
     case 'save-sheet': { saveSheet(); break; }
     case 'del-sheet-block': {
       if(!SHEET || SHEET.mode!=='edit') return;
@@ -1721,6 +1772,39 @@ document.addEventListener('focusin', (ev)=>{
 
 function numOf(v){ return Number(String(v==null?'':v).replace(/\s+/g,'').replace(',','.')); }
 
+/* 담아 둔 세트들을 실제 기록으로 만든다. 같은 종목·무게·횟수 기록이 그날 있으면 세트만 이어 붙인다. */
+function pushBlock(d, spec){
+  const same = d.blocks.find(b=>b.name===spec.name && Number(b.weight)===Number(spec.weight)
+    && (b.depth||'')===spec.depth && b.tag!=='prescribe' && Number(b.reps)===Number(spec.reps));
+  if(same){ same.sets = same.sets.concat(new Array(spec.sets).fill(spec.done)); return same; }
+  const b = { id:uid('b'), name:spec.name, part:spec.part, cat:spec.cat, weight:spec.weight,
+              depth:spec.depth, reps:spec.reps, tag:'manual', label:'',
+              sets:new Array(spec.sets).fill(spec.done), ts:Date.now() };
+  d.blocks.push(b);
+  return b;
+}
+
+/* 현재 입력칸의 무게·횟수·세트 수(+스쿼트 깊이)를 '담긴 세트' 목록에 한 줄로 쌓는다 */
+function stageSheet(){
+  if(!SHEET || SHEET.mode==='edit') return;
+  const sh = SHEET;
+  const nameEl = $('#sheetName'), wEl = $('#sheetWeight'), rEl = $('#sheetReps');
+  const name = String((nameEl ? nameEl.value : sh.name)||'').trim();
+  if(!name){ toast('종목 이름을 먼저 적어 주세요'); return; }
+  const weight = numOf(wEl ? wEl.value : sh.weight);
+  const reps = numOf(rEl ? rEl.value : sh.reps);
+  if(!isFinite(weight) || weight<0 || weight>500){ toast('중량을 확인해 주세요'); return; }
+  if(!isFinite(reps) || reps<1 || reps>100){ toast('횟수를 확인해 주세요'); return; }
+  const sets = Math.max(1, Math.min(20, Number(sh.sets)||1));
+  const depth = name.indexOf('스쿼트')>=0 ? (sh.depth||'풀') : '';
+  sh.name = name;
+  sh.staged = (sh.staged||[]).concat([{ weight, reps, sets, depth }]);
+  render();
+  /* 방금 담은 줄과 목록 끝이 시트 안에서 보이도록 스크롤 */
+  const box = document.getElementById('sheetStaged');
+  if(box){ try{ box.scrollIntoView({ block:'end' }); }catch(e){} }
+}
+
 function saveSheet(){
   if(!SHEET) return;
   const sh = SHEET;
@@ -1731,20 +1815,46 @@ function saveSheet(){
   const weight = numOf(wEl ? wEl.value : sh.weight);
   const reps = numOf(rEl ? rEl.value : sh.reps);
   const sets = Math.max(1, Math.min(20, Number(sh.sets)||1));
-  if(!isFinite(weight) || weight<0 || weight>500){ toast('중량을 확인해 주세요'); return; }
-  if(!isFinite(reps) || reps<1 || reps>100){ toast('횟수를 확인해 주세요'); return; }
   const d = day(sh.date);
   const part = sh.part;
   const cat = part==='lower' ? '하체' : (sh.cat||'등');
-  const depth = name.indexOf('스쿼트')>=0 ? (sh.depth||'풀') : '';
+  const depthBase = name.indexOf('스쿼트')>=0 ? (sh.depth||'풀') : '';
   const allPresets = Object.keys(PRESETS).reduce((a,k)=>a.concat(PRESETS[k]),[]);
   const known = allPresets.includes(name) || (S.custom||[]).some(c=>c.name===name);
+
+  /* 담아 둔 세트가 있으면 그것만 한꺼번에 저장한다(입력칸의 값은 저장하지 않음 — 버튼 문구로 안내) */
+  const staged = sh.mode==='add' ? (sh.staged||[]) : [];
+  if(staged.length){
+    for(const r of staged){
+      if(!isFinite(r.weight) || r.weight<0 || r.weight>500){ toast('담은 세트의 중량을 확인해 주세요'); return; }
+      if(!isFinite(r.reps) || r.reps<1 || r.reps>100){ toast('담은 세트의 횟수를 확인해 주세요'); return; }
+    }
+    const asDone = sh.date <= TODAY;   // 지난·오늘 기록은 '한 일'로 보고 완료 표시, 미래 날짜는 계획
+    let total = 0;
+    staged.forEach(r=>{
+      const n = Math.max(1, Math.min(20, Number(r.sets)||1));
+      total += n;
+      pushBlock(d, { name, part, cat,
+                     weight: r.weight, reps: r.reps, sets: n,
+                     depth: name.indexOf('스쿼트')>=0 ? (r.depth||depthBase||'풀') : '',
+                     done: asDone });
+    });
+    if(!known) S.custom.push({ name, part, cat });
+    toast(name+' '+staged.length+'개 세트를 저장했어요 · 총 '+total+'세트');
+    sh.staged = [];
+    SHEET = null;
+    save(); render();
+    return;
+  }
+
   if(sh.mode==='edit'){
     const b = d.blocks.find(x=>x.id===sh.blockId);
     if(!b){ SHEET=null; render(); return; }
+    if(!isFinite(weight) || weight<0 || weight>500){ toast('중량을 확인해 주세요'); return; }
+    if(!isFinite(reps) || reps<1 || reps>100){ toast('횟수를 확인해 주세요'); return; }
     const before = b.name;
     b.name = name;              /* 수정 화면에서도 이름 변경 허용 */
-    b.weight = weight; b.reps = reps; b.depth = depth; b.cat = cat; b.part = part;
+    b.weight = weight; b.reps = reps; b.depth = depthBase; b.cat = cat; b.part = part;
     const old = b.sets;
     const next = [];
     for(let i=0;i<sets;i++) next.push(old[i]!==undefined? old[i] : false);
@@ -1752,13 +1862,10 @@ function saveSheet(){
     if(!known) S.custom.push({ name, part, cat });
     toast(before!==name ? before+' → '+name+' 로 바꿨어요' : '수정했어요');
   } else {
+    if(!isFinite(weight) || weight<0 || weight>500){ toast('중량을 확인해 주세요'); return; }
+    if(!isFinite(reps) || reps<1 || reps>100){ toast('횟수를 확인해 주세요'); return; }
     const asDone = sh.date <= TODAY;   // 지난·오늘 기록은 '한 일'로 보고 완료 표시, 미래 날짜는 계획
-    const same = d.blocks.find(b=>b.name===name && Number(b.weight)===weight && (b.depth||'')===depth && b.tag!=='prescribe' && b.reps===reps);
-    if(same){ same.sets = same.sets.concat(new Array(sets).fill(asDone)); }
-    else {
-      d.blocks.push({ id:uid('b'), name, part, cat, weight, depth, reps,
-                      tag:'manual', label:'', sets:new Array(sets).fill(asDone), ts:Date.now() });
-    }
+    pushBlock(d, { name, part, cat, weight, reps, sets, depth: depthBase, done: asDone });
     // 새 종목 학습
     if(!known) S.custom.push({ name, part, cat });
     toast(name+' '+weight+'kg '+reps+'회 × '+sets+'세트 추가');
